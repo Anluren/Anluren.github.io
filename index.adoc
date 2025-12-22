@@ -5,7 +5,7 @@
 :page-description: Anluren's personal blog about programming, technology, and software development.
 :page-keywords: blog, programming, technology, software development
 
-WARNING: This site is still under construction. I'm still getting familiar with Jekyll and AsciiDoc, so things may change or break as I learn.
+⚠️ This site is still under construction. I'm still getting familiar with Jekyll and AsciiDoc, so things may change or break as I learn.
 
 I have been a software engineer for many years and have worked on a variety of projects mainly for embedded system with hardware ranging from microcontrollers to large network equipments, participating in all phases of the software development lifecycle. This blog is my personal space to share my thoughts and experiences on programming, technology, and software development.
 
