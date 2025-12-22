@@ -20,7 +20,7 @@ asciidoctor:
   base_dir: :docdir
   safe: unsafe
   attributes:
-    icons: font
+    icons: emoji
     idseparator: _
     stylesdir: css
     source-highlighter: coderay
