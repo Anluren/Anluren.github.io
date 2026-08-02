@@ -20,19 +20,3 @@ Also, I welcome feedback and suggestions from readers. If you have any comments 
 Check out my list of recommended blogs: link:blogroll.html[Blogroll]
 
 
-== C++ Syntax Highlighting Test
-
-
-[source,cpp,linenums]
-----
-#include <iostream>
-
-int main() {
-  std::cout << "Hello, C++!" << std::endl; // <1>
-  return 0; // <2>
-}
-----
-
-<1> Prints a greeting to the console.
-<2> Returns 0 to indicate successful execution.
-

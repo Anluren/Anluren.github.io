@@ -1,0 +1,364 @@
+= Build Personal VPN Server with VLESS + XTLS-Reality
+:showtitle:
+:page-navtitle: setup personal vpn server
+:page-excerpt: Detailed steps to set up a VPN server on a VPS using Xray-core with VLESS + XTLS-Reality and the 3x-ui web panel.
+:page-root: ../../../
+:toc: macro
+
+toc::[]
+
+== Why I Want My Own VPN Server
+
+I travel frequently between China and other countries, and having reliable access to the open internet is essential. Commercial VPN services are convenient, but they come with significant downsides: shared IPs get blocked by the GFW quickly, monthly subscription fees add up, and you're trusting a third party with all your traffic.
+
+Running my own VPN server on a VPS gives me full control — a dedicated IP that's less likely to be blacklisted, unlimited bandwidth at a fixed monthly cost (around $5–$12/month), and zero logging concerns. The setup takes about an hour, and once it's done, you have a personal high-speed tunnel that just works.
+
+In this post, I'll walk through the entire process: choosing a VPS provider, comparing VPN protocols for GFW circumvention, installing the server software, and configuring clients on Android, macOS, and Windows.
+
+== Choose a VPS Provider
+
+The first decision is where to host your server. Here are the key criteria:
+
+* **Location** — Servers physically close to China (Singapore, Tokyo, Seoul, Hong Kong) offer lower latency, typically 30–80ms. Some China-optimized routes (CN2 GIA, 9929, CMI) provide even better performance but cost more.
+* **Bandwidth** — At least 500 GB/month is comfortable for general use. 1–3 TB is better if you stream video.
+* **GFW risk** — Popular providers (DigitalOcean, Linode) have large IP blocks that the GFW sometimes throttles. Smaller or region-specific providers may have cleaner IP reputations.
+
+For my setup, I chose the **Vultr Cloud Compute** plan:
+
+[source]
+----
+1 vCPU
+1 GB RAM
+25 GB NVMe SSD
+1 TB bandwidth
+$5/month
+----
+
+I deployed the instance in Tokyo, which gives me consistently good latency to mainland China (40–60ms). Vultr lets you spin up and destroy instances quickly, making it easy to switch to a new IP if needed.
+
+Other providers worth considering:
+
+* **BandwagonHost** — Popular in the Chinese community for CN2 GIA routes; more expensive but excellent throughput during peak hours.
+* **HostHatch** — Competitive pricing and good Asia-Pacific coverage.
+* **GreenCloud** — Budget-friendly with decent routes to China.
+
+TIP: Most providers bill hourly. You can test an instance for a day before committing to a monthly plan.
+
+== Install Ubuntu 26.04 LTS
+
+Once your VPS is provisioned, log in via SSH. Vultr (and most providers) will give you the root password or SSH key option during setup.
+
+[source,bash]
+----
+ssh root@<your-server-ip>
+----
+
+[NOTE]
+====
+**Basic Security Hardening**
+
+Before installing anything, run a few quick steps to lock down the server:
+
+* Update the system: `apt update && apt upgrade -y`
+* Create a non-root user and add to sudo: `adduser deploy && usermod -aG sudo deploy`
+* Copy your SSH key and disable password auth in `/etc/ssh/sshd_config`
+* Enable the firewall: `ufw allow OpenSSH && ufw enable`
+====
+
+Ubuntu 26.04 LTS ships with kernel 6.14+, which includes native WireGuard support and recent TCP congestion control improvements (BBR v3). Enable BBR for better throughput:
+
+[source,bash]
+----
+echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+sysctl -p
+----
+
+Verify BBR is active:
+
+[source,bash]
+----
+sysctl net.ipv4.tcp_congestion_control
+# Output: net.ipv4.tcp_congestion_control = bbr
+----
+
+== VPN Technology Comparison
+
+There are three main approaches for running a VPN server. Each has different trade-offs, especially when the goal is bypassing the GFW.
+
+=== WireGuard
+
+WireGuard is the simplest and fastest option. It runs in the kernel, has minimal overhead, and is natively supported on Linux, Android, macOS, and Windows.
+
+However, WireGuard traffic patterns are well-known to the GFW. The protocol handshake is distinctive, and large-scale blocking is straightforward. While some users report it still working, it's unreliable for long-term use inside China — it may work for weeks, then get blocked without warning.
+
+*Pros:* Simple setup, excellent performance, built into the kernel.
+*Cons:* Easily detected and blocked by deep packet inspection (DPI).
+
+=== OpenVPN
+
+OpenVPN over TCP on port 443 can blend in with normal HTTPS traffic, making it harder to block. But it's noticeably slower due to userspace TLS overhead, and the connection setup is complex (certificates, CA management).
+
+*Pros:* Mature, well-supported, configurable to evade trivial blocking.
+*Cons:* Slow, certificate management is tedious, not ideal for high-throughput scenarios.
+
+=== Xray-core with VLESS + XTLS-Reality
+
+This is the current state-of-the-art for GFW circumvention. Here's why:
+
+* **VLESS** is a lightweight protocol designed specifically to replace VMess, with less handshake overhead and no built-in encryption (it relies on TLS for that).
+* **XTLS-Reality** takes it further: instead of using a self-signed or Let's Encrypt certificate (which can be fingerprinted), it *steals* the TLS certificate of a real external website (like `microsoft.com` or `apple.com`). To an observer — including the GFW — your traffic looks identical to a browser connecting to that legitimate site.
+
+The result is a tunnel that's nearly impossible to distinguish from real HTTPS traffic. No known DPI technique can reliably detect a properly configured XTLS-Reality connection as of 2026.
+
+*Pros:* Strongest anti-censorship capability, good performance, active development.
+*Cons:* More complex initial setup (mitigated by using 3x-ui), requires a real TLS destination as "camouflage."
+
+=== Recommendation
+
+For anyone inside China who needs reliable circumvention, *Xray-core with VLESS + XTLS-Reality is the clear recommendation*. I'll also cover WireGuard briefly as a lightweight fallback — it can be added as a secondary inbound in 3x-ui with minimal effort.
+
+== Install Xray-core
+
+Xray-core is the engine that handles the proxy protocol. Install it using the official XTLS installation script:
+
+[source,bash]
+----
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+----
+
+After installation, the script automatically registers a systemd service. Check that it's running:
+
+[source,bash]
+----
+systemctl status xray
+# ● xray.service - Xray Service
+#    Loaded: loaded (/etc/systemd/system/xray.service; enabled; ...)
+#    Active: active (running)
+----
+
+The default configuration file is at `/usr/local/etc/xray/config.json`. We won't edit it directly — 3x-ui will manage Xray's configuration through its web panel.
+
+== Install 3x-ui
+
+link:https://github.com/MHSanaei/3x-ui[3x-ui] is a web-based management panel for Xray-core. It replaces the older v2-ui project and adds support for VLESS, Reality, and subscription sharing. The panel handles all the complex JSON configuration behind a clean web interface.
+
+Install it with the official script:
+
+[source,bash]
+----
+bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+----
+
+The installer will:
+. Install 3x-ui
+. Configure it to manage Xray
+. Start the web panel on port `2053` (default)
+. Print the admin credentials
+
+Look for output like this:
+
+[source]
+----
+╔═══════════════════════════════════════════════════════════════╗
+║             3X-UI Installation Completed!                     ║
+╠═══════════════════════════════════════════════════════════════╣
+║  URL: http://<your-server-ip>:2053/<random-path>             ║
+║  Username: admin                                             ║
+║  Password: <random-password>                                 ║
+╚═══════════════════════════════════════════════════════════════╝
+----
+
+[NOTE]
+====
+**Security note:** The panel uses a randomized path (e.g., `/a1b2c3d4/`) to prevent unauthorized access. You can change it later in the panel settings.
+
+To make the panel accessible over HTTPS, you can configure an SSL certificate through 3x-ui's built-in ACME client (under Panel Settings → SSL Certificate) or put it behind a reverse proxy like Nginx.
+====
+
+Open your browser and navigate to the URL shown in the output. Log in with the provided credentials.
+
+== Configure via 3x-ui
+
+Now we'll set up the VLESS + XTLS-Reality inbound. This is the core of the tunnel.
+
+=== Add an Inbound
+
+. In the 3x-ui dashboard, go to *Inbounds* → *Add Inbound*.
+. Fill in the fields:
+
+|===
+| Field | Value
+
+| Protocol
+| `vless`
+
+| Port
+| `443` (standard HTTPS port, least suspicious)
+
+| Network
+| `tcp`
+
+| Security
+| `reality`
+|===
+
+=== Configure Reality Settings
+
+Scroll down to the *Reality* section:
+
+|===
+| Field | Value | Notes
+
+| Dest
+| `microsoft.com:443` | The real site your traffic will mimic. Choose a major CDN-backed domain.
+
+| Server Names
+| `microsoft.com` | Must match the SNI of the destination.
+
+| Private Key
+| _(click "Generate")_ | Generates a fresh X25519 keypair.
+
+| Public Key
+| _(auto-filled)_ | Send this to your clients.
+
+| Short ID
+| _(click "Generate")_ | A random hex string; clients must match it.
+
+| Flow
+| `xtls-rprx-vision` | Required for VLESS + Reality.
+|===
+
+Click *Generate* for both the Private Key and Short ID fields — 3x-ui will fill them automatically.
+
+=== Configure the Client Certificate
+
+Under the *Reality* section, you'll see a *Client* area. Add a client entry:
+
+|===
+| Field | Value
+
+| Email
+| `my-phone` (any label — used to identify the client)
+
+| Flow
+| `xtls-rprx-vision`
+
+| Id (UUID)
+| _(click "Generate")_
+|===
+
+Click *Save* at the bottom of the page.
+
+=== Open the Firewall Port
+
+Make sure port 443 is open:
+
+[source,bash]
+----
+ufw allow 443/tcp
+----
+
+=== Export Client Configuration
+
+After saving the inbound, 3x-ui can generate ready-to-import configuration strings. From the Inbounds list, click the *Info* (details) icon on your inbound, then click the *Share* button. You'll get:
+
+* A **subscription link** (`vless://...`) — use this to import into client apps
+* A **QR code** — scan it directly from v2RayTun or v2rayN
+* A **JSON config snippet** — for manual import into V2BOX or other clients
+
+TIP: The subscription link is the easiest method. Copy it and paste it into your client apps — no manual fields to fill.
+
+=== (Optional) Add WireGuard Fallback
+
+While you're in 3x-ui, you can add a WireGuard inbound as a backup:
+
+. Add a new inbound with *Protocol* set to `wireguard`.
+. Assign a private key and a port (e.g., `51820`).
+. Add client peers with their public keys.
+
+WireGuard won't bypass the GFW reliably, but it's useful for accessing your server from outside China with better performance, or as a recovery channel if the Xray tunnel ever goes down.
+
+== Client Setup
+
+=== Android — v2RayTun
+
+The best client for Android is link:https://github.com/2dust/v2rayNG[v2RayTun] (a v2rayNG fork with tun-mode support for system-wide proxy).
+
+. Install from link:https://play.google.com/store/apps/details?id=com.v2ray.ang[Google Play] or download the APK from the link:https://github.com/2dust/v2rayNG/releases[GitHub releases page].
+. Open v2RayTun, tap the *+* button in the top-right corner.
+. Choose *Import Config from Clipboard* — paste the `vless://` subscription link you copied from 3x-ui.
+. Alternatively, tap *Scan QR Code* and point your camera at the QR code from the 3x-ui Share dialog.
+. After importing, you'll see your server in the list. Tap the *Play* button (paper-plane icon) to connect.
+. On first connection, Android will prompt you to allow the VPN — accept it.
+
+The app shows real-time upload/download speeds and the current proxy status in the notification bar.
+
+=== macOS — V2BOX
+
+link:https://github.com/v2box/v2box[V2BOX] is the most polished Xray client for macOS, available on both the App Store and GitHub.
+
+. Install from the link:https://apps.apple.com/app/v2box/id6446814690[Mac App Store] or download the DMG from the link:https://github.com/v2box/v2box/releases[GitHub releases page].
+. Open V2BOX. From the menu bar, go to *Server* → *Add Server* → *Import URL*.
+. Paste the `vless://` subscription link from 3x-ui.
+. Alternatively, go to *Import Config* and paste the full JSON config.
+. Once added, click the *Connect* toggle in the main window.
+. V2BOX sets up a system proxy automatically — all your traffic will route through the VPN.
+
+[NOTE]
+====
+If you prefer a more lightweight option, link:https://github.com/yanue/V2rayU[V2rayU] is a well-known alternative. It hasn't been updated as frequently as V2BOX, but it remains functional and widely used.
+====
+
+=== Windows — v2rayN
+
+link:https://github.com/2dust/v2rayN[v2rayN] (version 6+) is the standard Xray client for Windows.
+
+. Download the latest release from the link:https://github.com/2dust/v2rayN/releases[GitHub releases page]. Get the `v2rayN-windows-64.zip` (or the `-SelfContained-` variant if you don't have .NET installed).
+. Extract the archive and run `v2rayN.exe`.
+. In the main window, go to *Server* → *Share Url* → *Add Share URL* and paste the `vless://` link. Click *OK*.
+. Alternatively, go to *Server* → *Scan QR Code* to scan from the 3x-ui Share dialog.
+. Right-click on the added server and select *Set as Active Server*.
+. In the system tray, right-click the v2rayN icon and choose *System Proxy* → *Set System Proxy* (or *Enable TUN Mode* for system-wide routing).
+
+The system tray icon turns blue when connected. You can check the routing status in the *Routing* tab.
+
+== Testing
+
+Once your server is configured and your client is connected, verify that traffic is flowing correctly.
+
+=== Basic Connectivity Check
+
+Open a browser and visit link:https://www.google.com[Google]. If it loads, your tunnel is working. For more rigorous testing:
+
+. Visit link:https://ipleak.net[IPLeak] — it should show your VPS IP address, not your local ISP.
+. Visit link:https://fast.com[Fast.com] or run a speed test — compare throughput with and without the VPN.
+. Visit a known-blocked site in China (e.g., link:https://www.youtube.com[YouTube], link:https://twitter.com[Twitter]) to confirm GFW circumvention.
+
+=== Per-Platform Checks
+
+**Android:** The v2RayTun notification shows the current upload/download speed and connection duration. Toggle the connection off and on to verify it reconnects cleanly.
+
+**macOS:** In V2BOX, the log tab shows real-time connection events. You can toggle *Verbose Logging* to diagnose issues.
+
+**Windows:** In v2rayN, the *Log* tab and system tray icon color (blue = connected, gray = disconnected) provide status at a glance.
+
+=== Troubleshooting
+
+* *Can't connect at all* — Check that port 443 is open (`ufw status` on the server) and that your VPS firewall (e.g., Vultr firewall, security group) isn't blocking inbound traffic.
+* *Connects but no data flows* — Verify that the *Server Names* field in 3x-ui Reality settings matches the destination domain exactly. Some ISPs or corporate networks block non-standard traffic on port 443.
+* *Works then stops after a few days* — The GFW may have throttled your IP. In Vultr, destroy the instance and deploy a new one (your 3x-ui config can be backed up from *Settings* → *Backup/Restore*). Switch to a different destination domain (e.g., `cloudflare.com:443`) for a fresh camouflage.
+* *Slow speeds* — Try a different VPS location (Singapore, Tokyo, and Seoul are all within 80ms of major Chinese cities). Enable BBR as described in the Ubuntu setup section if you haven't already.
+
+== References
+
+These resources were invaluable while setting up my server:
+
+* link:https://github.com/XTLS/Xray-core[Xray-core] — The core proxy engine (GitHub).
+* link:https://xtls.github.io/en/config/[Xray Configuration Guide] — Official reference for protocol and transport settings.
+* link:https://github.com/MHSanaei/3x-ui[3x-ui] — Web panel for Xray management (GitHub).
+* link:https://github.com/XTLS/Xray-install[Xray Install Script] — Official installation script used in this guide.
+* link:https://github.com/2dust/v2rayN[v2rayN (Windows)] — Windows client (GitHub).
+* link:https://github.com/2dust/v2rayNG[v2RayTun / v2rayNG (Android)] — Android client (GitHub).
+* link:https://github.com/v2box/v2box[V2BOX (macOS)] — macOS client (GitHub).
+* link:https://github.com/net4people/bbs[Net4People BBS] — Active community forum for censorship circumvention discussion, with real-world GFW reports and workarounds.
