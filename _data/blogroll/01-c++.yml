@@ -1,0 +1,17 @@
+title: C++
+blogs:
+  - name: Fluent C++
+    url: https://www.fluentcpp.com/
+    excerpt: "Articles and tips on expressive code and modern C++ idioms."
+  - name: The Old New Thing
+    url: https://devblogs.microsoft.com/oldnewthing/
+    excerpt: "Raymond Chen's blog, often covering Windows and C++ internals."
+  - name: C++ Stories
+    url: https://www.cppstories.com/
+    excerpt: "Modern C++ techniques, news, and best practices."
+  - name: Meeting C++ Blog
+    url: https://www.meetingcpp.com/blog/
+    excerpt: "Community news, event coverage, and C++ resources."
+  - name: C++ Weekly
+    url: https://www.youtube.com/c/CppWeeklyWithJasonTurner
+    excerpt: "Jason Turner's video blog on C++ tips and tricks."

@@ -1,0 +1,5 @@
+title: AI compiler
+blogs:
+  - name: Modular Blog
+    url: https://www.modular.com/blog/democratizing-compute-part-1-deepseeks-impact-on-ai
+    excerpt: "Chris Lattner's 'Democratizing Compute' series on DeepSeek's impact on AI and the role of AI compilers like MLIR."
