@@ -1,5 +1,8 @@
 title: AI compiler
 blogs:
-  - name: Modular Blog
+  - name: Democratizing Compute
     url: https://www.modular.com/blog/democratizing-compute-part-1-deepseeks-impact-on-ai
     excerpt: "Chris Lattner's 'Democratizing Compute' series on DeepSeek's impact on AI and the role of AI compilers like MLIR."
+  - name: TVM for beginners
+    url: https://www.compilersutra.com/docs/tvm-for-beginners/
+    excerpt: "An introduction to Apache TVM: what it is, why it was created, and how its optimization pipeline works."
