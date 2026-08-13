@@ -82,8 +82,10 @@
         <div class="panel">
             <h5>Featured</h5>
 
-            <h6><a href="{{ page.root }}2026/08/01/setup-vpn-server-on-vps.html">Build Personal VPN Server with VLESS + XTLS-Reality</a></h6>
-            <p>Detailed steps to set up a VPN server on a VPS using Xray-core with VLESS + XTLS-Reality and the 3x-ui web panel.</p>
+            {% for item in site.featured %}
+            <h6><a href="{{ item.link | prepend: site.baseurl }}">{{ item.title }}</a></h6>
+            {{ item.content }}
+            {% endfor %}
         </div>
 
     </aside>

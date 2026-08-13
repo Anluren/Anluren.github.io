@@ -6,6 +6,10 @@ keywords: blog, programming, technology, software development
 author: Anluren
 url: https://anluren.github.io
 
+collections:
+  featured:
+    output: false
+
 exclude:
 - LICENSE
 - README.adoc
