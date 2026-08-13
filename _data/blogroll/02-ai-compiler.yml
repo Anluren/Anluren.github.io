@@ -6,3 +6,6 @@ blogs:
   - name: TVM for beginners
     url: https://www.compilersutra.com/docs/tvm-for-beginners/
     excerpt: "An introduction to Apache TVM: what it is, why it was created, and how its optimization pipeline works."
+  - name: LLM Inference Handbook
+    url: https://handbook.modular.com/
+    excerpt: "LLM Inference Handbook is your technical glossary, guidebook, and reference - all in one. It covers everything you need to know about LLM inference, from core concepts and performance metrics (e.g., Time to First Token and Tokens per Second), to optimization techniques (e.g., continuous batching and prefix caching), GPU architecture, and deployment patterns like BYOC and on-prem."
