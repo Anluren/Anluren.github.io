@@ -32,7 +32,8 @@
 }
 
 /* Exclude callout markers (1) (2) ... from selection and copy */
-.listingblock .conum {
+.listingblock .conum,
+.listingblock .conum[data-value] + b {
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;

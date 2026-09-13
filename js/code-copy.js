@@ -44,7 +44,10 @@
 
       button.on('click', function () {
         var clone = source[0].cloneNode(true);
-        $(clone).find('.conum').remove();
+        $(clone).find('.conum').each(function () {
+          $(this).next('b').remove();
+          $(this).remove();
+        });
         var text = clone.textContent.replace(/[ \t]+$/gm, '');
 
         var done = function (ok) {
