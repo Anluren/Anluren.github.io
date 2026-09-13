@@ -9,7 +9,7 @@ Building LLVM from source is easy: run `cmake`, run `ninja`, wait a long time. B
 This post is my attempt to collect the pieces I keep needing to look up. It draws heavily on two sources:
 
 . Alex Bradbury's excellent article https://muxup.com/building-testing-and-distributing-llvm-clang-and-friends[Building, cross-building, testing, distributing LLVM and Clang and friends]
-. The official LLVM documentation: https://llvm.org/docs/AdvancedBuilds.html[Advanced Build Configurations], https://llvm.org/docs/CMake.html[Building LLVM with CMake] and https://libcxx.llvm.org/BuildingLibcxx.html[BuildingLibcxx]
+. The official LLVM documentation: https://llvm.org/docs/AdvancedBuilds.html[Advanced Build Configurations], https://llvm.org/docs/CMake.html[Building LLVM with CMake] and https://releases.llvm.org/19.1.0/projects/libcxx/docs/BuildingLibcxx.html[BuildingLibcxx]
 
 Everything below is written against LLVM HEAD (which at the time of writing is LLVM 24) on Linux, using the Ninja generator. Adjust the target architecture and host compiler to taste.
 
@@ -223,5 +223,5 @@ After this, compiling with the stage2 clang resolves everything to the libc++/co
 * https://llvm.org/docs/AdvancedBuilds.html[LLVM -- Advanced Build Configurations]
 * https://llvm.org/docs/CMake.html[LLVM -- Building LLVM with CMake]
 * https://llvm.org/docs/BuildingADistribution.html[LLVM -- Building a Distribution of LLVM]
-* https://libcxx.llvm.org/BuildingLibcxx.html[libc++ -- Building libc++]
+* https://releases.llvm.org/19.1.0/projects/libcxx/docs/BuildingLibcxx.html[libc++ -- Building libc++]
 * https://llvm.org/docs/GettingStarted.html[LLVM -- Getting Started]
