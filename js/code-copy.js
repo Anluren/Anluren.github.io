@@ -45,7 +45,7 @@
       button.on('click', function () {
         var clone = source[0].cloneNode(true);
         $(clone).find('.conum').remove();
-        var text = clone.textContent;
+        var text = clone.textContent.replace(/[ \t]+$/gm, '');
 
         var done = function (ok) {
           button.html(ok ? '<i class="fa fa-check"></i>' : '<i class="fa fa-copy"></i>');

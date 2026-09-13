@@ -30,3 +30,11 @@
   outline: 2px solid #4a90d9;
   outline-offset: 1px;
 }
+
+/* Exclude callout markers (1) (2) ... from selection and copy */
+.listingblock .conum {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
