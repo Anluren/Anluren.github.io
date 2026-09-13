@@ -43,7 +43,9 @@
         .html('<i class="fa fa-copy"></i>');
 
       button.on('click', function () {
-        var text = source.text();
+        var clone = source[0].cloneNode(true);
+        $(clone).find('.conum').remove();
+        var text = clone.textContent;
 
         var done = function (ok) {
           button.html(ok ? '<i class="fa fa-check"></i>' : '<i class="fa fa-copy"></i>');

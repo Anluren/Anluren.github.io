@@ -4,7 +4,7 @@
 
 .code-copy-btn {
   position: absolute;
-  top: 0.5rem;
+  bottom: 0.5rem;
   right: 0.5rem;
   z-index: 10;
   padding: 0.25rem 0.5rem;
