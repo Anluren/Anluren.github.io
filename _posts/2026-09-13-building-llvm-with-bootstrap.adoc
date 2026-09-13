@@ -1,0 +1,227 @@
+= Building LLVM and Clang with a Bootstrap Build
+:showtitle:
+:page-navtitle: Building LLVM with Bootstrap
+:page-excerpt: How to do a two-stage bootstrap build of LLVM/Clang to produce a complete toolchain -- clang, lld and friends, then compiler-rt, libunwind, libc++ and libc++abi -- using the just-built compiler.
+:page-root: ../../../
+
+Building LLVM from source is easy: run `cmake`, run `ninja`, wait a long time. But building LLVM *properly* -- producing a complete, self-hosted toolchain where your freshly built compiler is used to build the runtime libraries (compiler-rt, libunwind, libc++, libc++abi) -- takes a bit more care. This is the "bootstrap" build.
+
+This post is my attempt to collect the pieces I keep needing to look up. It draws heavily on two sources:
+
+. Alex Bradbury's excellent article https://muxup.com/building-testing-and-distributing-llvm-clang-and-friends[Building, cross-building, testing, distributing LLVM and Clang and friends]
+. The official LLVM documentation: https://llvm.org/docs/AdvancedBuilds.html[Advanced Build Configurations], https://llvm.org/docs/CMake.html[Building LLVM with CMake] and https://libcxx.llvm.org/BuildingLibcxx.html[BuildingLibcxx]
+
+Everything below is written against LLVM HEAD (which at the time of writing is LLVM 24) on Linux, using the Ninja generator. Adjust the target architecture and host compiler to taste.
+
+== What is a bootstrap build?
+
+A *bootstrap* (or *multi-stage*) build is a chain of builds in which the output of one stage is the compiler used to build the next one. In the simplest and most common case:
+
+. The *stage1* compiler is built using your host toolchain (system clang or gcc). It is a throwaway.
+. The *stage2* compiler is built using the just-built stage1 compiler. This is the compiler you keep.
+
+Link:https://llvm.org/docs/BuildingADistribution.html[The LLVM docs recommend a bootstrap build when constructing a distribution] precisely because the compiler you end up shipping benefits from all of the fixes, optimizations and general improvements that the new compiler provides.
+
+== Prerequisites
+
+You need CMake, a C++ toolchain, Ninja, and a recent Python 3:
+
+[source,bash]
+----
+# Debian/Ubuntu
+sudo apt-get install build-essential cmake ninja-build python3 ccache clang lld
+----
+
+Notes:
+
+* The minimum CMake version required by LLVM is `3.20.0`. Note that starting with LLVM 24, the minimum will be raised to `3.31.0` (an older CMake currently logs a warning).
+* `clang`/`lld` are not strictly required for stage1 (gcc + GNU ld works too), but linking is dramatically faster with lld, and ccache keeps rebuilds cheap. Both are worth the tiny setup cost.
+* A Release build of clang needs a lot of RAM during linking. If you are tight on memory, cap the number of parallel link jobs with `-DLLVM_PARALLEL_LINK_JOBS=2` (or a matching value for your machine).
+
+== Getting the source
+
+[source,bash]
+----
+git clone https://github.com/llvm/llvm-project.git
+cd llvm-project
+----
+
+All commands below assume you are at the root of this checkout.
+
+== Projects vs. runtimes
+
+Before configuring anything, you have to understand the two CMake variables that decide what gets built:
+
+* `LLVM_ENABLE_PROJECTS` -- tools and applications that sit on top of LLVM. For a toolchain you want at least `clang` and `lld`; `clang-tools-extra` (clangd, clang-tidy, and friends) is a common addition.
+* `LLVM_ENABLE_RUNTIMES` -- the runtime libraries that a compiler delivers along with itself: `compiler-rt`, `libcxx`, `libcxxabi`, `libunwind` (and `libc`, `openmp`, ...). The critical difference is that runtimes are *not* built with the host compiler: they are built with the just-built `clang` from the same build.
+
+Both variables take a semicolon-separated list, or `all`.
+
+The two lists must not overlap: a project such as `compiler-rt` used to live in `LLVM_ENABLE_PROJECTS` but now belongs in `LLVM_ENABLE_RUNTIMES`. As a rule of thumb: if something is delivered *with* the toolchain rather than being a tool *of* the toolchain, put it in runtimes.
+
+== Configuring the bootstrap build
+
+This is the configuration I use:
+
+[source,bash]
+----
+cmake -G Ninja \ <1>
+  -DCMAKE_BUILD_TYPE="Release" \ <2>
+  -DCLANG_ENABLE_BOOTSTRAP=ON \ <3>
+  -DLLVM_ENABLE_PROJECTS="clang;lld" \ <4>
+  -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" \ <5>
+  -DLLVM_ENABLE_ASSERTIONS=ON \ <6>
+  -DLLVM_CCACHE_BUILD=ON \ <7>
+  -DCMAKE_C_COMPILER=clang \ <8>
+  -DCMAKE_CXX_COMPILER=clang++ \ <9>
+  -DLLVM_ENABLE_LLD=ON \ <10>
+  -DBOOTSTRAP_LLVM_ENABLE_LLD=ON \ <11>
+  -DLLVM_TARGETS_TO_BUILD="X86" \ <12>
+  -DCLANG_BOOTSTRAP_PASSTHROUGH="LLVM_TARGETS_TO_BUILD;LLVM_ENABLE_ASSERTIONS" \ <13>
+  -DLLVM_APPEND_VC_REV=OFF \ <14>
+  -DBOOTSTRAP_LLVM_ENABLE_RUNTIMES="compiler-rt;libcxx;libcxxabi;libunwind" \ <15>
+  -B build/tool_chain \ <16>
+  -S llvm <17>
+----
+
+<1> `-G Ninja` selects the Ninja generator. Ninja is fast and does parallel builds well; it is the generator LLVM's own build system works best with. (You can omit this and let CMake guess, but you rarely want the Makefiles default.)
+<2> `CMAKE_BUILD_TYPE=Release` sets the optimization level. `Release` compiles with optimization on, no debug info, and no assertions by default. For a compiler you intend to keep and run, this is the fast option. A `Debug` build is far slower to run; see the note about assertions below.
+<3> `CLANG_ENABLE_BOOTSTRAP=ON` turns on the multi-stage machinery. This is the one option that changes everything: it makes the build produce a `stage2` target that compiles clang with the just-built clang.
+<4> `LLVM_ENABLE_PROJECTS="clang;lld"` lists the tools to build on top of LLVM. `clang` is the C/C++ compiler; `lld` is the linker. `lld` is there for two reasons: we want it in the final toolchain, and it links far faster than the system linker, which speeds up the whole build.
+<5> `LLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind"` sets the runtimes for the *stage1* build. Note that `compiler-rt` is deliberately absent here -- stage1 only needs the libc++ headers so the stage1 clang can find C++ headers when it compiles stage2.
+<6> `LLVM_ENABLE_ASSERTIONS=ON` enables internal consistency checks in LLVM and Clang. They add a small runtime cost but catch bugs early, and are a good default for a toolchain you develop on. (Because `CMAKE_BUILD_TYPE=Release` disables assertions by default, this explicitly turns them back on.)
+<7> `LLVM_CCACHE_BUILD=ON` routes compilation through ccache so that recompiling unchanged translation units after a change is nearly free.
+<8> `CMAKE_C_COMPILER=clang` selects the host C compiler used to build *stage1*. Stage1 is built with your system toolchain; the just-built compiler is only used from stage2 onward.
+<9> `CMAKE_CXX_COMPILER=clang++` selects the host C++ compiler used to build *stage1*.
+<10> `LLVM_ENABLE_LLD=ON` makes the stage1 build link with lld instead of the system linker, which is dramatically faster.
+<11> `BOOTSTRAP_LLVM_ENABLE_LLD=ON` forwards to stage2 as `LLVM_ENABLE_LLD=ON` (the `BOOTSTRAP_` prefix is stripped). This is needed because `LLVM_ENABLE_LLD` is *not* in the automatic passthrough list, so without it stage2 would fall back to the system linker.
+<12> `LLVM_TARGETS_TO_BUILD="X86"` restricts the backends to just X86 to keep the build small and fast. Drop it (or set `all`) if you expect to touch other targets.
+<13> `CLANG_BOOTSTRAP_PASSTHROUGH="LLVM_TARGETS_TO_BUILD;LLVM_ENABLE_ASSERTIONS"` forwards these variables from stage1 to stage2. `LLVM_TARGETS_TO_BUILD` is not in the automatic passthrough list, so it must be listed here (or the stage2 build would compile every backend).
+<14> `LLVM_APPEND_VC_REV=OFF` stops the build embedding the git revision into the version string. This avoids relinking most binaries whenever the checkout moves, saving a lot of time in incremental builds.
+<15> `BOOTSTRAP_LLVM_ENABLE_RUNTIMES="compiler-rt;libcxx;libcxxabi;libunwind"` sets the runtimes for *stage2* -- the toolchain we keep -- and this is where `compiler-rt` finally appears. Because `BOOTSTRAP_` variables are appended after the automatic passthrough and win on collision, this overrides the stage1 runtime list (<5>) for stage2.
+<16> `-B build/tool_chain` sets the build directory (where CMake writes its cache, object files and final binaries).
+<17> `-S llvm` points CMake at the source tree -- the `llvm/` subdirectory of the checkout. LLVM requires out-of-source builds, hence the separate `-B`/`-S` directories.
+
+== Building stage2
+
+[source,bash]
+----
+cmake --build build/tool_chain -t stage2
+----
+
+That single target does the whole dance:
+
+. Builds stage1 (LLVM tools + clang + lld) with your system compiler, into `build/tool_chain/bin/`.
+. Builds the stage1 runtimes (the libc++ headers clang needs) with the stage1 compiler.
+. Configures and builds stage2 in a completely separate build tree at `build/tool_chain/tools/clang/stage2-bins/`, this time using the stage1 clang. Stage2 gets the full runtime list -- `compiler-rt`, `libcxx`, `libcxxabi`, `libunwind` -- because of the `BOOTSTRAP_LLVM_ENABLE_RUNTIMES` override.
+
+Wherever you need the final result, your stage2 binaries live in:
+
+[source,bash]
+----
+build/tool_chain/tools/clang/stage2-bins/bin/
+----
+
+== What gets passed to stage2?
+
+This is where people get confused. The stage2 build is *not* "the same options as stage1". Only a fixed, small list of variables is passed from the stage1 to the stage2 CMake invocation. It is the `_BOOTSTRAP_DEFAULT_PASSTHROUGH` list defined in `clang/CMakeLists.txt`, and conveniently for us it *includes* `LLVM_ENABLE_PROJECTS` and `LLVM_ENABLE_RUNTIMES`.
+
+Three mechanisms control the stage2 configuration:
+
+* `_BOOTSTRAP_DEFAULT_PASSTHROUGH` -- the automatic set (versions, vendor, `CMAKE_BUILD_TYPE`, `LLVM_ENABLE_PROJECTS`, `LLVM_ENABLE_RUNTIMES`, ...).
+* `CLANG_BOOTSTRAP_PASSTHROUGH` -- your own list of variables to forward, e.g. `-DCLANG_BOOTSTRAP_PASSTHROUGH="LLVM_TARGETS_TO_BUILD;LLVM_ENABLE_ASSERTIONS"`. `LLVM_TARGETS_TO_BUILD` is *not* in the automatic list, which is why we forward it here.
+* `BOOTSTRAP_` prefix -- any variable you define with the `BOOTSTRAP_` prefix is passed to stage2 with that prefix stripped. `-DBOOTSTRAP_LLVM_ENABLE_LLD=ON` becomes `LLVM_ENABLE_LLD=ON` in stage2.
+
+The `BOOTSTRAP_` variables are appended *after* the automatic passthrough in the stage2 CMake command line, and CMake lets the last `-D` for a variable win. That is exactly why `-DBOOTSTRAP_LLVM_ENABLE_RUNTIMES="compiler-rt;libcxx;libcxxabi;libunwind"` overrides the automatically-forwarded `LLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind"` and gives stage2 the full set including `compiler-rt`. It is a subtle but handy trick.
+
+Because stage2 is driven by its own CMake invocation, you cannot introspect its full build graph from the top level. `ninja -n -v stage2` only shows the inner `cmake` calls that kick off the stage2 configure/build.
+
+== The runtime build order (builtins first)
+
+Inside the runtimes build, *compiler-rt builtins are built first*, as a separate "builtins" step. This ordering matters: the other runtimes need `libclang_rt.builtins` to exist so the just-built compiler can pass the CMake configure checks. The dependency tree is roughly:
+
+. *compiler-rt builtins* (`libclang_rt.builtins`) -- needed for the compiler's own configure checks and for the other runtimes.
+. *libunwind* -- the C/C++ unwinding library.
+. *libc++abi* -- the C++ ABI library (Itanium ABI implementation) on top of libunwind.
+. *libc++* -- the C++ standard library on top of libc++abi.
+. The rest of *compiler-rt* (sanitizers, profile/coverage runtimes, and so on) -- built last inside the `compiler-rt` runtime target.
+
+Even though this is a blog post and not the upstream docs, I will say it again because it is the #1 footgun: *do not* put `compiler-rt`, `libcxx`, `libcxxabi` or `libunwind` in `LLVM_ENABLE_PROJECTS`. They only get built against the just-built compiler when listed in `LLVM_ENABLE_RUNTIMES`. If a runtime project ends up in `LLVM_ENABLE_PROJECTS`, the CMake configure fails with a "duplicate entry" style error.
+
+== Testing the bootstrap build
+
+The build system creates `stage2-*` aliases for a number of targets. By default, `CLANG_BOOTSTRAP_TARGETS` is `check-llvm;check-clang;check-all`, which gives you:
+
+[source,bash]
+----
+cmake --build build/tool_chain -t stage2-check-llvm
+cmake --build build/tool_chain -t stage2-check-clang
+cmake --build build/tool_chain -t stage2-check-all
+----
+
+To also get `stage2-runtimes`, `stage2-cxx`, `stage2-cxxabi`, `stage2-unwind` and friends for driving the runtimes directly, extend the list at configure time:
+
+[source,bash]
+----
+-DCLANG_BOOTSTRAP_TARGETS="check-llvm;check-clang;check-all;runtimes;cxx;cxxabi;unwind;builtins"
+----
+
+`check-all` runs everything and takes a while -- on a modern desktop expect on the order of 10 minutes of wall time for the C++ runtimes alone (`check-cxx` is by far the slowest of the runtime tests).
+
+== Installing the toolchain
+
+Once stage2 is built, install it directly from the stage2 build tree, overriding the prefix to your toolchain directory:
+
+[source,bash]
+----
+sudo cmake --install build/tool_chain/tools/clang/stage2-bins/ \
+  --prefix /opt/buildtools/llvm-stage2
+----
+
+The `--prefix` argument overrides `CMAKE_INSTALL_PREFIX` at install time, so you do not need to bake the install path into the CMake configuration. This installs the full stage2 toolchain: `clang`, `lld`, the resource headers, and the runtime libraries (`compiler-rt`, `libunwind`, `libc++`, `libc++abi`).
+
+You can then use it with:
+
+[source,bash]
+----
+export PATH="/opt/buildtools/llvm-stage2/bin:$PATH"
+export LD_LIBRARY_PATH="/opt/buildtools/llvm-stage2/lib:/opt/buildtools/llvm-stage2/lib/x86_64-unknown-linux-gnu:$LD_LIBRARY_PATH"
+
+clang --version
+----
+
+(The second `export` is only needed if your programs link against the shared `libc++.so`/`libc++abi.so` from the toolchain; the exact per-target subdirectory depends on your `LLVM_TARGETS_TO_BUILD`.)
+
+TIP: `ninja -C build/tool_chain stage2-install` is an equivalent one-liner, but it installs to the `CMAKE_INSTALL_PREFIX` that was recorded at configure time (which defaults to `/usr/local` unless you set it), so the `cmake --install ... --prefix` approach above is usually the more convenient of the two.
+
+== Making the toolchain actually default to its own runtimes
+
+By default the newly built clang still picks up the host system's C++ standard library and runtime. If you want the final toolchain to be self-contained -- a proper "toolchain", which is usually the point of a bootstrap build -- flip the stage2 defaults with `BOOTSTRAP_` variables:
+
+[source,bash]
+----
+-DBOOTSTRAP_CLANG_DEFAULT_CXX_STDLIB=libc++
+-DBOOTSTRAP_CLANG_DEFAULT_RTLIB=compiler-rt
+-DBOOTSTRAP_CLANG_DEFAULT_UNWINDLIB=libunwind
+-DBOOTSTRAP_CLANG_DEFAULT_LINKER=lld
+-DBOOTSTRAP_LIBCXX_USE_COMPILER_RT=ON
+-DBOOTSTRAP_LIBCXXABI_USE_LLVM_UNWINDER=ON
+-DBOOTSTRAP_LIBUNWIND_USE_COMPILER_RT=ON
+----
+
+After this, compiling with the stage2 clang resolves everything to the libc++/compiler-rt/libunwind you just built, instead of the host glibc/libstdc++/libgcc.
+
+== A few practical notes
+
+* *Build type.* The stage1 compiler is throwaway. Do not waste effort on exotic optimizations for it; `Release` with assertions is the usual sweet spot. Optimization-heavy options (LTO, PGO, BOLT) belong on stage2 via `BOOTSTRAP_` variables.
+* *ccache.* `LLVM_CCACHE_BUILD=ON` keeps incremental rebuilds fast. For stage2 you can additionally set `BOOTSTRAP_LLVM_CCACHE_BUILD=ON`.
+* *Disk and RAM.* A full build, even single-target X86, eats well over 100 GB of disk and can chew tens of GB of RAM while linking. Keep an eye on `LLVM_PARALLEL_LINK_JOBS`.
+
+== References
+
+* https://muxup.com/building-testing-and-distributing-llvm-clang-and-friends[Muxup -- Building, cross-building, testing, distributing LLVM and Clang and friends] (the inspiration for this post)
+* https://llvm.org/docs/AdvancedBuilds.html[LLVM -- Advanced Build Configurations]
+* https://llvm.org/docs/CMake.html[LLVM -- Building LLVM with CMake]
+* https://llvm.org/docs/BuildingADistribution.html[LLVM -- Building a Distribution of LLVM]
+* https://libcxx.llvm.org/BuildingLibcxx.html[libc++ -- Building libc++]
+* https://llvm.org/docs/GettingStarted.html[LLVM -- Getting Started]
