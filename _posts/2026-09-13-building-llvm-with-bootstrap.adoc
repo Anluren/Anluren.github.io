@@ -211,6 +211,52 @@ By default the newly built clang still picks up the host system's C++ standard l
 
 After this, compiling with the stage2 clang resolves everything to the libc++/compiler-rt/libunwind you just built, instead of the host glibc/libstdc++/libgcc.
 
+== Pinning the GCC toolchain with a clang config file
+
+clang borrows its C and C{plus}{plus} headers and libraries from GCC. It usually finds the system GCC on its own, but when you build against a non-default install -- a newer `gcc` under `/opt/gcc`, say -- you have to tell clang where it lives. The `--gcc-toolchain=` driver flag does that: it points clang at the GCC *prefix*, the directory that contains `lib/gcc/...` and `include/c{plus}{plus}/...`.
+
+Rather than repeating that flag on every command line, collect it in a *configuration file*. A clang config file is just a list of driver options -- one option per line, `#` starts a comment -- that clang reads as if they had been typed directly. They are the natural place to pin toolchain and codegen options for a particular target.
+
+First find the GCC prefix. `readlink` resolves the `g++` on your `PATH` to the real binary, and `sed` strips the `bin/<name>` suffix to leave the prefix:
+
+[source,bash]
+----
+readlink -f "$(which g++)"
+# -> /usr/bin/x86_64-linux-gnu-g++-13
+
+readlink -f "$(which g++)" | sed 's#/bin/[^/]*##'
+# -> /usr
+----
+
+The `--gcc-toolchain=` value is that *prefix* (a directory), not the `g++` binary -- that is what the `sed` is for. Write it into a config file:
+
+[source,bash]
+----
+cat > gcc-toolchain.cfg <<'EOF'
+# use this GCC toolchain for headers and libraries
+--gcc-toolchain=/usr
+EOF
+----
+
+Load it on a single invocation with `--config=`:
+
+[source,bash]
+----
+clang --config=gcc-toolchain.cfg -c foo.c -o foo.o
+----
+
+If the `--config=` argument contains a directory separator it is treated as a file path; otherwise clang searches for the name in its user config directory, its system config directory, and finally the directory the clang binary lives in. clang also loads config files automatically from those locations (names like `x86_64-pc-linux-gnu-clang.cfg`, `clang.cfg`, or `x86_64-pc-linux-gnu.cfg`); pass `--no-default-config` to stop that. The https://clang.llvm.org/docs/UsersManual.html#configuration-files[clang Users Manual] has the full search rules.
+
+To make the stage2 build use the config, reach for the same `BOOTSTRAP_` prefix from earlier: `--config=` is a compiler flag, so it belongs in `CMAKE_C_FLAGS` and `CMAKE_CXX_FLAGS`. Add these to the top-level `cmake` command:
+
+[source,bash]
+----
+-DBOOTSTRAP_CMAKE_C_FLAGS="--config=/path/to/gcc-toolchain.cfg"
+-DBOOTSTRAP_CMAKE_CXX_FLAGS="--config=/path/to/gcc-toolchain.cfg"
+----
+
+The `BOOTSTRAP_` prefix is stripped in stage2, so these become `-DCMAKE_C_FLAGS=...` and `-DCMAKE_CXX_FLAGS=...` there, and every compile and link clang performs in stage2 goes through the config. Create the config file before you run the configure -- `--config=` errors if the file is missing.
+
 == A few practical notes
 
 * *Build type.* The stage1 compiler is throwaway. Do not waste effort on exotic optimizations for it; `Release` with assertions is the usual sweet spot. Optimization-heavy options (LTO, PGO, BOLT) belong on stage2 via `BOOTSTRAP_` variables.
@@ -223,5 +269,6 @@ After this, compiling with the stage2 clang resolves everything to the libc++/co
 * https://llvm.org/docs/AdvancedBuilds.html[LLVM -- Advanced Build Configurations]
 * https://llvm.org/docs/CMake.html[LLVM -- Building LLVM with CMake]
 * https://llvm.org/docs/BuildingADistribution.html[LLVM -- Building a Distribution of LLVM]
+* https://clang.llvm.org/docs/UsersManual.html#configuration-files[Clang -- Configuration files]
 * https://releases.llvm.org/19.1.0/projects/libcxx/docs/BuildingLibcxx.html[libc++ -- Building libc++]
 * https://llvm.org/docs/GettingStarted.html[LLVM -- Getting Started]
