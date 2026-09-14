@@ -217,37 +217,32 @@ clang borrows its C and C{plus}{plus} headers and libraries from GCC. It usually
 
 Rather than repeating that flag on every command line, collect it in a *configuration file*. A clang config file is just a list of driver options -- one option per line, `#` starts a comment -- that clang reads as if they had been typed directly. They are the natural place to pin toolchain and codegen options for a particular target.
 
-First find the GCC prefix. `readlink` resolves the `g++` on your `PATH` to the real binary, and `sed` strips the `bin/<name>` suffix to leave the prefix:
+First find the GCC prefix. `readlink` resolves the `g++` on your `PATH` to the real binary, and `sed` strips the `bin/<name>` suffix to leave the prefix -- which is what `--gcc-toolchain=` wants:
 
 [source,bash]
 ----
-readlink -f "$(which g++)"
-# -> /usr/bin/x86_64-linux-gnu-g++-13
-
-readlink -f "$(which g++)" | sed 's#/bin/[^/]*##'
+GCC_PREFIX="$(readlink -f "$(which g++)" | sed 's#/bin/[^/]*##')"
+echo "$GCC_PREFIX"
 # -> /usr
 ----
 
-The `--gcc-toolchain=` value is that *prefix* (a directory), not the `g++` binary -- that is what the `sed` is for. Write it into a config file:
+Then write it into a config file in the user config directory (`~/.config/clang`). clang loads `clang.cfg` from there automatically -- `clang++.cfg` for the C++ driver -- so once the files exist you never have to pass the flag again:
 
 [source,bash]
 ----
-cat > gcc-toolchain.cfg <<'EOF'
+mkdir -p ~/.config/clang
+cat > ~/.config/clang/clang.cfg <<EOF
 # use this GCC toolchain for headers and libraries
---gcc-toolchain=/usr
+--gcc-toolchain=$GCC_PREFIX
 EOF
+cp ~/.config/clang/clang.cfg ~/.config/clang/clang++.cfg
 ----
 
-Load it on a single invocation with `--config=`:
+Because the config is loaded automatically, the stage1 clang that builds stage2 reads the same file -- so `--gcc-toolchain=` reaches stage2 for free, with no `BOOTSTRAP_` forwarding.
 
-[source,bash]
-----
-clang --config=gcc-toolchain.cfg -c foo.c -o foo.o
-----
+If you would rather not make the config global, load it explicitly with `--config=`: an argument with a directory separator is a path, while a bare name is searched in `~/.config/clang` (or `$XDG_CONFIG_HOME/clang`), `/etc/clang`, and finally the directory the clang binary lives in. Pass `--no-default-config` to stop clang loading defaults automatically. The https://clang.llvm.org/docs/UsersManual.html#configuration-files[clang Users Manual] has the full search rules and the file names clang looks for (`<triple>-clang.cfg`, `clang.cfg`, `<triple>.cfg`, and so on).
 
-If the `--config=` argument contains a directory separator it is treated as a file path; otherwise clang searches for the name in its user config directory, its system config directory, and finally the directory the clang binary lives in. clang also loads config files automatically from those locations (names like `x86_64-pc-linux-gnu-clang.cfg`, `clang.cfg`, or `x86_64-pc-linux-gnu.cfg`); pass `--no-default-config` to stop that. The https://clang.llvm.org/docs/UsersManual.html#configuration-files[clang Users Manual] has the full search rules.
-
-To make the stage2 build use the config, reach for the same `BOOTSTRAP_` prefix from earlier: `--config=` is a compiler flag, so it belongs in `CMAKE_C_FLAGS` and `CMAKE_CXX_FLAGS`. Add these to the top-level `cmake` command:
+To keep the config project-local and still forward it to stage2, reach for the same `BOOTSTRAP_` prefix from earlier: `--config=` is a compiler flag, so it belongs in `CMAKE_C_FLAGS` and `CMAKE_CXX_FLAGS`:
 
 [source,bash]
 ----
