@@ -40,10 +40,12 @@
   user-select: none;
 }
 
-/* Color callout markers inside code blocks */
-.listingblock .conum[data-value] {
+/* Color callout markers inside code blocks and callout lists */
+.listingblock .conum[data-value],
+.colist .conum[data-value] {
   background: #4a90d9;
 }
-.listingblock .conum[data-value]::after {
+.listingblock .conum[data-value]::after,
+.colist .conum[data-value]::after {
   color: #fff;
 }
