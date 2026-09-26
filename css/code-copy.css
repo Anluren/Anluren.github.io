@@ -39,3 +39,11 @@
   -ms-user-select: none;
   user-select: none;
 }
+
+/* Color callout markers inside code blocks */
+.listingblock .conum[data-value] {
+  background: #4a90d9;
+}
+.listingblock .conum[data-value]::after {
+  color: #fff;
+}
