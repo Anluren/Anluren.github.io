@@ -44,6 +44,10 @@
 
       button.on('click', function () {
         var clone = source[0].cloneNode(true);
+        // Drop line-number markers (Coderay renders them as a .line-numbers
+        // table cell or inline span) and callout markers, so copied text is
+        // plain code only.
+        $(clone).find('.line-numbers').remove();
         $(clone).find('.conum').each(function () {
           $(this).next('b').remove();
           $(this).remove();
