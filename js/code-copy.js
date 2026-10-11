@@ -52,7 +52,7 @@
           $(this).next('b').remove();
           $(this).remove();
         });
-        var text = clone.textContent.replace(/[ \t]+$/gm, '');
+        var text = clone.textContent.replace(/[ \t]+$/gm, '').trim();
 
         var done = function (ok) {
           button.html(ok ? '<i class="fa fa-check"></i>' : '<i class="fa fa-copy"></i>');
