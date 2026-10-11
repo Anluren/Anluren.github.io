@@ -198,7 +198,7 @@ TIP: `ninja -C build/tool_chain stage2-install` is an equivalent one-liner, but 
 
 By default the newly built clang still picks up the host system's C++ standard library and runtime. If you want the final toolchain to be self-contained -- a proper "toolchain", which is usually the point of a bootstrap build -- flip the stage2 defaults with `BOOTSTRAP_` variables:
 
-[source,bash]
+[source,bash,linenums]
 ----
 -DBOOTSTRAP_CLANG_DEFAULT_CXX_STDLIB=libc++
 -DBOOTSTRAP_CLANG_DEFAULT_RTLIB=compiler-rt
