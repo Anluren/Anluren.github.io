@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="{{page.root}}css/coderay.css">
     <link rel="stylesheet" href="{{page.root}}css/asciidoctor.css">
     <link rel="stylesheet" href="{{page.root}}css/code-copy.css">
+    <link rel="stylesheet" href="{{page.root}}css/footer.css">
     <script src="{{page.root}}js/vendor/modernizr.js"></script>
     <script src="{{page.root}}js/toc.js"></script>
 </head>
@@ -99,14 +100,23 @@
 
 <!-- Footer -->
 
-<footer class="row">
+<footer class="row site-footer">
     <div class="large-12 columns">
         <hr>
         <div class="row">
-            <div class="large-12 columns">
-                <p>Footer</p>
+            <div class="large-8 medium-8 columns">
+                <p class="copyright">&copy; {{ site.time | date: '%Y' }} {{ site.title }}. All rights reserved.</p>
+                <p class="tagline">{{ site.description }}</p>
+            </div>
+            <div class="large-4 medium-4 columns">
+                <ul class="footer-links right">
+                    <li><a href="{{ page.root }}">Home</a></li>
+                    <li><a href="{{ page.root }}blogroll.html">Blogroll</a></li>
+                    <li><a href="https://github.com/Anluren" target="_blank" rel="noopener">GitHub</a></li>
+                </ul>
             </div>
         </div>
+        <p class="footer-built">Built with <a href="https://jekyllrb.com" target="_blank" rel="noopener">Jekyll</a> and <a href="https://asciidoctor.org" target="_blank" rel="noopener">Asciidoctor</a>.</p>
     </div>
 </footer>
 
